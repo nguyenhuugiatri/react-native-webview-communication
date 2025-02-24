@@ -1,70 +1,137 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useState, useCallback } from 'react';
 import { View, Button, Alert } from 'react-native';
-import WebView from 'react-native-webview';
+import WebView, { WebViewMessageEvent } from 'react-native-webview';
+
+type WebMessage = {
+  type: 'handshake' | 'ping' | 'pong' | 'error';
+  data?: string;
+};
 
 export default function HomeScreen() {
+  const [isConnected, setIsConnected] = useState(false);
   const webViewRef = useRef<WebView>(null);
-  const isConnectionReadyRef = useRef<Boolean>(false);
+  const hasInjectedScript = useRef(false);
 
-  const injectScript = () => {
-    if (isConnectionReadyRef.current) return;
+  const injectScript = useCallback(() => {
+    if (hasInjectedScript.current || isConnected) return;
 
     webViewRef.current?.injectJavaScript(`
       (function() {
-        if (!window.ReactNativeWebView) return;
+        if (!window.ReactNativeWebView) {
+          console.error('ReactNativeWebView not available');
+          return;
+        }
 
-        const channel = new MessageChannel();
-        window.messagePort = channel.port1;
-
-        window.messagePort.onmessage = (msg) => {
-          if (window.ReactNativeWebView) {
-            window.ReactNativeWebView.postMessage("Received from iframe: " + msg.data);
-          }
-        };
-
-        window.messagePort.start();
-        window.postMessage({ type: "iframe_ready" }, "*", [channel.port2]);
-        window.ReactNativeWebView.postMessage("MessageChannel initialized");
-
-        window.sendPing = function() {
+        try {
           if (window.messagePort) {
-            window.messagePort.postMessage("ping");
-          } else {
-            window.ReactNativeWebView.postMessage("Error: messagePort is not set");
+            window.ReactNativeWebView.postMessage(JSON.stringify({
+              type: "error",
+              data: "MessagePort already initialized"
+            }));
+            return;
           }
-        };
+
+          const channel = new MessageChannel();
+          window.messagePort = channel.port1;
+
+          window.messagePort.onmessage = (event) => {
+            window.ReactNativeWebView.postMessage(JSON.stringify({
+              type: event.data.type,
+              data: event.data.data
+            }));
+          };
+
+          window.postMessage({ type: "handshake" }, "*", [channel.port2]);
+
+          window.sendMessage = function(type, data) {
+            if (!window.messagePort) {
+              window.ReactNativeWebView.postMessage(JSON.stringify({
+                type: "error",
+                data: "MessagePort not initialized"
+              }));
+              return;
+            }
+            window.messagePort.postMessage({ type, data });
+          };
+        } catch (error) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: "error",
+            data: error.message
+          }));
+        }
       })();
       true;
     `);
 
-    isConnectionReadyRef.current = true;
-  };
+    hasInjectedScript.current = true;
+  }, [isConnected]);
 
-  const sendPing = () => {
-    if (!isConnectionReadyRef.current) {
-      return;
-    }
-    webViewRef.current?.injectJavaScript('sendPing(); true;');
-  };
+  const sendMessage = useCallback(
+    (type: WebMessage['type'], data?: string) => {
+      if (!isConnected) {
+        Alert.alert('Error', 'Connection not established yet');
+        return;
+      }
+      webViewRef.current?.injectJavaScript(`
+      window.sendMessage('${type}', '${data || ''}');
+      true;
+    `);
+    },
+    [isConnected]
+  );
+
+  const handleMessage = useCallback(
+    (event: WebViewMessageEvent) => {
+      try {
+        const message: WebMessage = JSON.parse(event.nativeEvent.data);
+        switch (message.type) {
+          case 'handshake':
+            if (!isConnected) {
+              setIsConnected(true);
+              Alert.alert('Success', message.data || 'Connection established');
+            }
+            break;
+          case 'pong':
+            Alert.alert('Response', message.data || 'pong');
+            break;
+          case 'error':
+            Alert.alert('Error', message.data || 'Unknown error');
+            break;
+          default:
+            console.warn('Unknown message type:', message.type);
+        }
+      } catch (error) {
+        console.error('Message handling error:', error);
+        Alert.alert('Error', 'Failed to parse message');
+      }
+    },
+    [isConnected]
+  );
 
   return (
-    <View
-      style={{
-        height: 300,
-      }}
-    >
-      <WebView
-        javaScriptEnabled
-        ref={webViewRef}
-        style={{ width: 0, height: 0 }}
-        source={{ uri: 'http://localhost:3000' }}
-        onLoadEnd={() => {
-          injectScript();
-          isConnectionReadyRef.current = true;
-        }}
-        onMessage={(event) => alert(event.nativeEvent.data)}
-      />
-      <Button title="Send Ping" onPress={sendPing} />
+    <View style={{ flex: 1, flexDirection: 'column' }}>
+      <View style={{ flex: 3 }}>
+        <WebView
+          javaScriptEnabled
+          ref={webViewRef}
+          source={{ uri: 'http://localhost:3000' }}
+          onLoadEnd={injectScript}
+          onMessage={handleMessage}
+          onError={(syntheticEvent) => {
+            Alert.alert(
+              'WebView Error',
+              syntheticEvent.nativeEvent.description
+            );
+          }}
+        />
+      </View>
+      <View style={{ flex: 1, justifyContent: 'center', padding: 10 }}>
+        <Button
+          title="Send Ping"
+          onPress={() => sendMessage('ping')}
+          disabled={!isConnected}
+        />
+      </View>
     </View>
   );
 }
