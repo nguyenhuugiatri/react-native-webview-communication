@@ -110,7 +110,7 @@ export default function HomeScreen() {
 
   return (
     <View style={{ flex: 1, flexDirection: 'column' }}>
-      <View style={{ flex: 3 }}>
+      <View style={{ width: 0, height: 0 }}>
         <WebView
           javaScriptEnabled
           ref={webViewRef}
@@ -125,7 +125,7 @@ export default function HomeScreen() {
           }}
         />
       </View>
-      <View style={{ flex: 1, justifyContent: 'center', padding: 10 }}>
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
         <Button
           title="Send Ping"
           onPress={() => sendMessage('ping')}
