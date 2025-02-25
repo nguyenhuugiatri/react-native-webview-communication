@@ -52,7 +52,7 @@ export class WebViewManager {
 export const WebViewRoot = ({ uri }: { uri: string }) => {
   const manager = WebViewManager.getInstance();
   return (
-    <View style={{ position: 'absolute', width: 1, height: 1, opacity: 0 }}>
+    <View style={{ flex: 1, paddingLeft: 40, paddingTop: 100 }}>
       <WebViewContainer
         ref={manager.setWebViewRef}
         uri={uri}
